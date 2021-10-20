@@ -24,7 +24,7 @@ oc apply -n bookinfo -f https://raw.githubusercontent.com/Maistra/istio/maistra-
 ```
 
 #### Exposing the bookinfo application
-Get the default ingress domain and replace the $EXTERNAL_DOMAIN variable in ossm/certs.sh_ and ossm/certs/cert.conf_ files.
+Get the default ingress domain and replace the $EXTERNAL_DOMAIN variable in _ossm/certs.sh_ and _ossm/certs/cert.conf_ files.
 
 ```
 oc -n openshift-ingress-operator get ingresscontrollers default -o json | jq -r '.status.domain'
@@ -65,7 +65,7 @@ oc process -f httpbin/httpbin.yaml \
     | oc apply -n bookinfo -f -
 ```
 
-Replace the $EXTERNAL_DOMAIN variable in the [OpenShift route object](./httpbin/httpbin-route.yaml) object) and in the following command. Create the OCP route.
+Replace the $EXTERNAL_DOMAIN variable in the [OpenShift route object](./httpbin/httpbin-route.yaml) object and in the following command. Create the OCP route.
 ```
 oc process -f httpbin/httpbin-route.yaml \
     -p HTTPBIN_ROUTE_NAME="httpbin" -p HTTPBIN_ROUTE="httpbin.$EXTERNAL_DOMAIN" -p HTTPBIN_ROUTE_SECURE="httpbin.secure.$EXTERNAL_DOMAIN"\
@@ -539,6 +539,11 @@ oc apply -n bookinfo -f lab5/httpbin-dr.yaml
 ```
 
 #### Trigger the circuit breaker
+Now lets execute the following command that opens 1 simultaneous connections (-c 1) and send 30 requests (-n 30).
+```
+oc exec -n bookinfo -it ${FORTIO_POD} -c fortio -- /usr/bin/fortio load -c 1 -qps 0 -n 30 -loglevel Warning http://httpbin:9080/get
+```
+
 Now lets execute the following command that opens 2 simultaneous connections (-c 2) and send 30 requests (-n 30).
 ```
 oc exec -n bookinfo -it ${FORTIO_POD} -c fortio -- /usr/bin/fortio load -c 2 -qps 0 -n 30 -loglevel Warning http://httpbin:9080/get
@@ -632,4 +637,17 @@ oc delete -n bookinfo -f ossm/smm.yaml
 Delete bookinfo project
 ```
 oc delete project bookinfo
+```
+
+Delete ingress credential
+```
+oc delete secret ingress-credential -n istio-system
+```
+
+Delete OCP routes
+```
+oc delete route bookinfo -n istio-system
+oc delete route bookinfo-secure -n istio-system
+oc delete route httpbin -n istio-system
+oc delete route httpbin-secure -n istio-system
 ```
