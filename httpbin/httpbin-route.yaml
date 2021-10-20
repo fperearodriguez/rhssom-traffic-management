@@ -1,0 +1,68 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  template: httpbin-route
+metadata:
+  annotations:
+    description: A group of interconnected demo services for testing Open Shift Service Mesh.
+    iconClass: icon-openshift
+    openshift.io/display-name: A group of interconnected demo services for testing Open Shift Service Mesh.
+    openshift.io/documentation-url: https://github.com/maistra/istio/tree/maistra-2.1/samples/httpbin
+    openshift.io/provider-display-name: Red Hat
+    tags: httpbin,demo,service,istio
+  labels:
+    template: httpbin-route
+  name: httpbin-route
+objects:
+
+##################################################################################################
+# Route
+##################################################################################################
+
+- kind: Route
+  apiVersion: route.openshift.io/v1
+  metadata:
+    name: ${HTTPBIN_ROUTE_NAME}
+  spec:
+    host: ${HTTPBIN_ROUTE}
+    to:
+      kind: Service
+      name: istio-ingressgateway
+      weight: 100
+    port:
+      targetPort: http2
+
+- kind: Route
+  apiVersion: route.openshift.io/v1
+  metadata:
+    name: ${HTTPBIN_ROUTE_NAME}-secure
+  spec:
+    host: ${HTTPBIN_ROUTE_SECURE}
+    to:
+      kind: Service
+      name: istio-ingressgateway
+      weight: 100
+    port:
+      targetPort: https
+    wildcardPolicy: None
+    tls:
+      termination: passthrough
+
+###############################################################################
+# Parameters
+###############################################################################
+
+parameters:
+
+- description: Route URL for external access to HTTPBIN service
+  name: HTTPBIN_ROUTE
+  displayName: Route URL for external access to HTTPBIN service
+  required: true
+- description: Secure Route URL for external access to HTTPBIN service
+  name: HTTPBIN_ROUTE_SECURE
+  displayName: Secure Route URL for external access to HTTPBIN service
+  required: true
+- description: Name of the route for external access to HTTPBIN service
+  name: HTTPBIN_ROUTE_NAME
+  displayName: Name of the route for external access to HTTPBIN service
+  required: true

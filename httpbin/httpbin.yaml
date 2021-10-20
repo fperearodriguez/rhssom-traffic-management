@@ -1,0 +1,200 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  template: httpbin-template
+metadata:
+  annotations:
+    description:  HTTP request and response service.
+    iconClass: icon-openshift
+    openshift.io/display-name:  HTTP request and response service.
+    openshift.io/documentation-url: https://github.com/postmanlabs/httpbin
+    openshift.io/provider-display-name: Red Hat
+    tags: httpbin,demo,service,istio
+  labels:
+    template: httpbin-template
+  name: httpbin-template
+objects:
+
+##################################################################################################
+# Httpbin services
+##################################################################################################
+
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: httpbin
+    labels:
+      app: httpbin
+      service: httpbin
+  spec:
+    ports:
+    - port: 9080
+      name: http
+    selector:
+      app: httpbin
+
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: httpbin-v1
+    labels:
+      app: httpbin
+      version: v1
+  spec:
+    replicas: ${{HTTPBIN_REPLICAS}}
+    selector:
+      matchLabels:
+        app: httpbin
+        version: v1
+    template:
+      metadata:
+        annotations:
+          sidecar.istio.io/inject: "true"
+        labels:
+          app: httpbin
+          version: v1
+      spec:
+        containers:
+        - name: httpbin
+          image: ${HTTPBIN_IMAGE}:${HTTPBIN_TAG}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GUNICORN_CMD_ARGS
+              value: >-
+                --capture-output
+                --error-logfile -
+                --access-logfile -
+                --access-logformat '%(h)s %(t)s %(r)s %(s)s Host: %({Host}i)s}'
+          command: ["gunicorn", "-b", "0.0.0.0:9080", "httpbin:app", "-k", "gevent"]
+          ports:
+          - containerPort: 9080
+          volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+          resources:
+            limits:
+              cpu: ${CPU_LIMIT}
+              memory: ${MEMORY_LIMIT}Mi
+            requests:
+              cpu: ${CPU_REQUEST}
+              memory: ${MEMORY_REQUEST}Mi
+          readinessProbe:
+            tcpSocket:
+              port: 9080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+        volumes:
+        - name: tmp
+          emptyDir: {}
+
+# - apiVersion: networking.istio.io/v1beta1
+#   kind: VirtualService
+#   metadata:
+#     name: httpbin-gateway
+#   spec:
+#     hosts:
+#     - httpbin
+#     http:
+#     - route:
+#       - destination:
+#           host: httpbin
+#           subset: v1
+
+- apiVersion: networking.istio.io/v1beta1
+  kind: DestinationRule
+  metadata:
+    name: httpbin
+  spec:
+    host: httpbin
+    trafficPolicy:
+      tls:
+        mode: ISTIO_MUTUAL
+    subsets:
+    - name: v1
+      labels:
+        version: v1
+
+##################################################################################################
+# Ingress gateway
+##################################################################################################
+
+# - apiVersion: networking.istio.io/v1beta1
+#   kind: Gateway
+#   metadata:
+#     name: httpbin-gateway
+#   spec:
+#     selector:
+#       istio: ingressgateway
+#     servers:
+#     - port:
+#         number: 80
+#         name: http
+#         protocol: HTTP
+#       hosts:
+#       - ${HTTPBIN_ROUTE}
+
+- apiVersion: networking.istio.io/v1beta1
+  kind: VirtualService
+  metadata:
+    name: httpbin
+  spec:
+    hosts:
+    - ${HTTPBIN_ROUTE}
+    - ${HTTPBIN_ROUTE_SECURE}
+    gateways:
+    - istio-system/default-gateway
+    http:
+    - route:
+      - destination:
+          host: httpbin
+          port:
+            number: 9080
+
+###############################################################################
+# Parameters
+###############################################################################
+
+parameters:
+
+- description: Sets the HTTPBIN service image.
+  name: HTTPBIN_IMAGE
+  displayName: HTTPBIN_IMAGE
+  value: kennethreitz/httpbin
+- description: Sets the DEBUG image tag.
+  name: HTTPBIN_TAG
+  displayName: HTTPBIN_TAG
+  value: latest
+- description: Specifies how many instances of the HTTPBIN service to create.
+  name: HTTPBIN_REPLICAS
+  displayName: HTTPBIN replicas
+  value: "1"
+- description: Route URL for external access to HTTPBIN service
+  name: HTTPBIN_ROUTE
+  displayName: Route URL for external access to HTTPBIN service
+  required: true
+- description: Secure Route URL for external access to HTTPBIN service
+  name: HTTPBIN_ROUTE_SECURE
+  displayName: Secure Route URL for external access to HTTPBIN service
+  required: true
+
+- description: Sets the memory limit in Mi, available to each service.
+  name: MEMORY_LIMIT
+  displayName: Service Memory Limit
+  value: "512"
+- description: Sets the initial memory request in Mi for each service.
+  name: MEMORY_REQUEST
+  displayName: Service Memory Request
+  value: "100"
+- description: Sets the CPU limit, available to each service.
+  name: CPU_LIMIT
+  displayName: Service CPU Limit
+  value: "1.0"
+- description: Sets the initial CPU request for each service.
+  name: CPU_REQUEST
+  displayName: Service CPU Request
+  value: "0.1"
