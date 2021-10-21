@@ -23,6 +23,7 @@ spec:
         - GET
         paths:
         - "/productpage"
+        - "/static*"
     - operation:
         methods:
         - POST
