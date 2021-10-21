@@ -1,0 +1,19 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+ name: istio-ingressgateway-mtls
+ namespace: istio-system
+spec:
+  action: ALLOW
+  rules:
+  - when:
+    - key: request.regex.headers[x-forwarded-for]
+      values:
+      - .*$YOUR_EXTERNAL_IP,"*.*
+  - when:
+    - key: request.regex.headers[x-forwarded-client-cert]
+      values:
+      - ".*\"CN=$YOUR_CN_CERTIFICATE*"
+  selector:
+    matchLabels:
+      istio: ingressgateway

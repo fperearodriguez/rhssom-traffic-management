@@ -37,7 +37,7 @@ Create the certificates.
 
 Client and server certificates should be created under ossm/certs/ folder. Now, create the secret in OCP:
 ```
-oc create secret tls ingress-credential -n istio-system --key=ossm/certs/server.key --cert=ossm/certs/server.pem
+oc create secret generic ingress-credential -n istio-system --from-file=tls.key=ossm/certs/server.key --from-file=tls.crt=ossm/certs/server.pem --from-file=ca.crt=ossm/certs/ca.pem
 ```
 
 Replace the $EXTERNAL_DOMAIN variable in the [Gateway object](./ossm/istio-system/gw-default.yaml), [OpenShift route object](./ossm/istio-system/route-bookinfo.yaml) and [Bookinfo VS object](./ossm/bookinfo/vs-bookinfo.yaml). Create Gateway, Virtual Services, Destination Rules and OpenShift route.
