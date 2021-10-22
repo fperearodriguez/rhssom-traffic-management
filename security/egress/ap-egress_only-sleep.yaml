@@ -1,0 +1,15 @@
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+ name: istio-egress-only-sleep
+ namespace: istio-system
+spec:
+  action: ALLOW
+  rules:
+  - when:
+    - key: request.regex.headers[x-forwarded-client-cert]
+      values:
+      - ".*URI=spiffe://cluster.local/ns/bookinfo/sa/sleep.*"
+  selector:
+    matchLabels:
+      istio: default-egress
