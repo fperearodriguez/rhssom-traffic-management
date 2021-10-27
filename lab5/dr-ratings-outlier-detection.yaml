@@ -1,0 +1,14 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: ratings
+spec:
+  host: ratings
+  trafficPolicy:
+    outlierDetection:
+      baseEjectionTime: 1m
+      consecutive5xxErrors: 2
+      interval: 10s
+      maxEjectionPercent: 100
+    tls:
+      mode: ISTIO_MUTUAL

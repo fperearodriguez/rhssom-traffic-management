@@ -68,7 +68,7 @@ oc process -f httpbin/httpbin.yaml \
 Replace the $EXTERNAL_DOMAIN variable in the [OpenShift route object](./httpbin/httpbin-route.yaml) object and in the following command. Create the OCP route.
 ```
 oc process -f httpbin/httpbin-route.yaml \
-    -p HTTPBIN_ROUTE_NAME="httpbin" -p HTTPBIN_ROUTE="httpbin.$EXTERNAL_DOMAIN" -p HTTPBIN_ROUTE_SECURE="httpbin.secure.$EXTERNAL_DOMAIN"\
+    -p HTTPBIN_ROUTE_NAME="httpbin" -p HTTPBIN_ROUTE="httpbin.$EXTERNAL_DOMAIN" -p HTTPBIN_ROUTE_SECURE="httpbin.secure.$EXTERNAL_DOMAIN" -p HTTPBIN_REPLICAS=3\
     -n istio-system \
     | oc apply -n istio-system -f -
 ```
@@ -478,98 +478,167 @@ Finally, delete the VS used
 oc delete -n bookinfo vs reviews ratings
 ```
 
-## Lab 5: Circuit Breaking
+## Lab 5: Circuit Breaking & Outlier Detection
+### Circuit Breaking
 In this lab you are going to configure circuit breaking for connections. This is very important for building resilient microservices, since it helps to limit the impact of failures and latency spikes.
 
-You are going to deploy _httpbin_ and _fortio_ applications for this lab. _httpbin_ is an http requests and response service and _fortio_ is an application developed by the Istio team to load test microservices. You are going to use it as the client to trigger the circuit breaking configurations.
+For this task, we will start by setting a CircuitBreaking in reviews service in order to limit to a single connection and request to it.
 
-For the circuit breaking, you are going to use this DestinationRule:
+Configure this change by executing:
 ```
-apiVersion: networking.istio.io/v1beta1
+oc apply -n bookinfo -f lab5/reviews-only-to-v2-and-cb.yaml
+```
+
+To validate that everything works fine with a single connection to that service, run:
+```
+export GATEWAY_URL=$(oc get route bookinfo -n istio-system -o jsonpath='{.spec.host}')
+while true; do curl -s http://$GATEWAY_URL/productpage | grep -i reviews; sleep 0.5 ; done
+
+      <h4 class="text-center text-primary">Book Reviews</h4>
+      <h4 class="text-center text-primary">Book Reviews</h4>
+      <h4 class="text-center text-primary">Book Reviews</h4>
+      ......
+```
+
+Notice that 100% of the traffic is succesfully managed by reviews service. In addition, there is a 'ray' icon in the reviews application square that identify the presence of a CB definition.
+
+In details, this is the part of YAML that is set in the DestinationRule that defines this CB:
+```
+      trafficPolicy:
+        connectionPool:
+          http:
+            http1MaxPendingRequests: 1
+            maxRequestsPerConnection: 1
+          tcp:
+            maxConnections: 1
+```
+
+Let’s now generate some load…​ by adding a 10 clients calling out bookinfo app:
+```
+seq 1 10 | xargs -n1 -P10 curl -s http://$GATEWAY_URL/productpage | grep -i reviews
+
+      <h4 class="text-center text-primary">Book Reviews</h4>
+      <h4 class="text-center text-primary">Book Reviews</h4>
+      <h4 class="text-center text-primary">Book Reviews</h4>
+      <h4 class="text-center text-primary">Error fetching product reviews!</h4>
+      <p>Sorry, product reviews are currently unavailable for this book.</p>
+      <h4 class="text-center text-primary">Book Reviews</h4>
+      <h4 class="text-center text-primary">Book Reviews</h4>
+      <h4 class="text-center text-primary">Error fetching product reviews!</h4>
+      <p>Sorry, product reviews are currently unavailable for this book.</p>
+```
+
+You could see now is that some requests are rejected by the reviews service due to the circuit breaker, both from the test output and from Kiali as well:
+
+<img src="./lab5/cb-open.png" alt="Circuit Breaker" width=80%>
+
+### Outlier Detection
+In this lab, we are going to discover how an unhealthy pod, which we don't know which one is, it is responding with 5x errors.
+
+First, we need to deploy a custom ratings deployment:
+```
+oc apply -n bookinfo -f lab5/deploy-ratings.yaml
+```
+
+Then, let’s randomly make one pod of our ratings service to fail by executing:
+```
+oc exec -n bookinfo -c ratings  $(oc get pods -n bookinfo -o NAME | grep ratings | tail -n1) -- curl -s ratings:9080/faulty
+
+{"status":"A ratings pod will start to fail"}
+```
+
+And run some tests now. Let’s have a look at the output as there will be some failures comming from an unknown (yet) ratings pod:
+```
+export GATEWAY_URL=$(oc get route bookinfo -n istio-system -o jsonpath='{.spec.host}')
+while true; do curl -s http://$GATEWAY_URL/productpage | egrep "Reviewer1|Reviewer2|Ratings service is currently unavailable"; sleep 0.5 ; done
+
+        <small>Reviewer1</small>
+        <small>Reviewer2</small>
+        <small>Reviewer1</small>
+        <small>Reviewer2</small>
+        <small>Reviewer1</small>
+        <p><i>Ratings service is currently unavailable</i></p>
+        <small>Reviewer2</small>
+        <p><i>Ratings service is currently unavailable</i></p>
+        <small>Reviewer1</small>
+        <small>Reviewer2</small>
+        <small>Reviewer1</small>
+        <small>Reviewer2</small>
+        <small>Reviewer1</small>
+        <small>Reviewer2</small>
+        <small>Reviewer1</small>
+        <p><i>Ratings service is currently unavailable</i></p>
+        <small>Reviewer2</small>
+        <p><i>Ratings service is currently unavailable</i></p>
+```
+
+It is time to make our services mesh more resiliant and see the effect of applying an OutlierDetection policy over ratings service:
+```
+oc apply -n bookinfo -f lab5/dr-ratings-outlier-detection.yaml
+```
+
+What we just applied is:
+```
+apiVersion: networking.istio.io/v1alpha3
 kind: DestinationRule
 metadata:
-  name: httpbin
+  name: ratings
 spec:
-  host: httpbin <1>
-  subsets:
-  - name: v1
-    labels:
-      version: v1
-  trafficPolicy: <2>
-    connectionPool: <3>
-      tcp: 
-        maxConnections: 1 
-      http:
-        http1MaxPendingRequests: 1 
-        maxRequestsPerConnection: 1
-    outlierDetection: <4>
-      consecutiveErrors: 1
-      interval: 1s
-      baseEjectionTime: 3m
-      maxEjectionPercent: 100
-```
-<1> The DR is for `httpbin` service, version 1.\
-<2> This property lets you create a Traffic Policy for this service.\
-<3> You only want a number of connections of 1 TCP connection and 1 HTTP request per connection.\
-<4> Here you are checking every second that any host with one error should be ejected from the pool for 3 minutes.
-
-You can do more things like load balancing, ejecting with consecutive 500 errors, and more. If you want to learn more, check the [Destination Rule](https://istio.io/v1.6/docs/reference/config/networking/destination-rule) page at Istio.
-
-
-After this, you are going to test the circuit breaking with the fortio client.
-
-### Deploy fortio
-Deploy fortio in the _bookinfo_ project:
-```
-oc apply -n bookinfo -f fortio/fortio.yaml
+  host: ratings
+  trafficPolicy:
+    outlierDetection:
+      baseEjectionTime: 1m (1)
+      consecutive5xxErrors: 2 (2)
+      interval: 10s (3)
+      maxEjectionPercent: 100 (4)
+    tls:
+      mode: ISTIO_MUTUAL
 ```
 
-Verify that you can get to _httpbin_ from _fortio_:
-```
-export FORTIO_POD=$(oc get pods --no-headers -n bookinfo | awk '{ print $1 }' | grep fortio) <1>
-oc exec -n bookinfo -it ${FORTIO_POD} -c fortio -- /usr/bin/fortio load -curl http://httpbin:9080/get <2>
-```
-<1> You are creating an environment variable called "FORTIO_POD" to make the tests easier.\
-<2> You are doing a single `GET` request inside the `fortio` pod to `httpbin`.
+Where:
+1. Minimum ejection duration. A host will remain ejected for a period equal to the product of minimum ejection duration and the number of times the host has been ejected. This technique allows the system to automatically increase the ejection period for unhealthy upstream servers.
+2. Number of 5xx errors before a host is ejected from the connection pool
+3. Time interval between ejection sweep analysis
+4. Maximum % of hosts in the load balancing pool for the upstream service that can be ejected.
 
-### Test the circuit breaking
-Apply the DR:
+Once the OutlierDetection has been applied to ratings service, run some tests again. You should notice that there should only be some errors at the begining of the test. Then, after a minute, those errors wil come again.. and then after 2.. and then 3 minutes…​ \
+This is the output of the unhealthy pod:
 ```
-oc apply -n bookinfo -f lab5/httpbin-dr.yaml
-```
-
-#### Trigger the circuit breaker
-Now lets execute the following command that opens 1 simultaneous connections (-c 1) and send 30 requests (-n 30).
-```
-oc exec -n bookinfo -it ${FORTIO_POD} -c fortio -- /usr/bin/fortio load -c 1 -qps 0 -n 30 -loglevel Warning http://httpbin:9080/get
-```
-
-Now lets execute the following command that opens 2 simultaneous connections (-c 2) and send 30 requests (-n 30).
-```
-oc exec -n bookinfo -it ${FORTIO_POD} -c fortio -- /usr/bin/fortio load -c 2 -qps 0 -n 30 -loglevel Warning http://httpbin:9080/get
-```
-
-You will notice that your results are not the same as the ones in the lab, but generally all requests arrive. This is because the istio-proxy is flexible and does not break all requests.
-
-If you change the connections to 4. You will start seeing that less connections arrive to the _httpbin_ service:
-```
-oc exec -n bookinfo -it ${FORTIO_POD} -c fortio -- /usr/bin/fortio load -c 4 -qps 0 -n 30 -loglevel Warning http://httpbin:9080/get
+10/26/2021, 11:35:21 PM GET /ratings/0
+10/26/2021, 11:35:21 PM Internal error: faulty pod
+10/26/2021, 11:35:22 PM GET /ratings/0
+10/26/2021, 11:35:22 PM Internal error: faulty pod   ---> Outlier detected. Ejected one minute
+10/26/2021, 11:36:23 PM GET /ratings/0
+10/26/2021, 11:36:23 PM Internal error: faulty pod
+10/26/2021, 11:36:24 PM GET /ratings/0
+10/26/2021, 11:36:24 PM Internal error: faulty pod
+10/26/2021, 11:36:25 PM GET /ratings/0
+10/26/2021, 11:36:25 PM Internal error: faulty pod   ---> Outlier detected. Ejected two minutes
+10/26/2021, 11:38:34 PM GET /ratings/0
+10/26/2021, 11:38:34 PM Internal error: faulty pod
+10/26/2021, 11:38:35 PM GET /ratings/0
+10/26/2021, 11:38:35 PM Internal error: faulty pod   ---> Outlier detected...
 ```
 
-If you query the istio-proxy stats, you can see how many requests were flagged for circuit breaking:
-```
-oc exec -n bookinfo ${FORTIO_POD} -c istio-proxy -- pilot-agent request GET stats | grep httpbin | grep upstream_rq_pending_overflow
-```
+This means that the OutlierDetection policy is working as expected because it is evicting the failing pod for a  minute.. then 2.. then 3 and so on. In the real world, this would help the exhausted pod to take some breath and recover by itself (when possible).
 
-Notice that the stats are grouped by the subsets defined in the DestinationRule.
+And now, it is time to detect wich is the failing pod. To do so I encourage you to use Kiali. For instance, you may go to`workloads`, click on ratings and:
 
-### Delete fortio
-Finally, delete the ojects used
-```
-oc delete -n bookinfo -f fortio/fortio.yaml
-oc delete -n bookinfo -f lab5/httpbin-dr.yaml
-```
+- Validate logs of each pod.
+- Identify the wrong pod by using the distributed tracing tooling:
 
+<img src="./lab5/error_traces.png" alt="Tracing" width=80%>
+
+For instance, with this last one, you can click on the red point in the summary of the traces and see the trace details. In these details, try to get the node-id as it will give you some information.
+
+
+Finally, kill the pod and check that everything goes back to normal.
+
+### Delete lab
+Finally, delete the VS used
+```
+oc delete -n bookinfo -f lab5/
+```
 
 ## Lab 6: Mirroring and Dark launches
 Traffic mirroring, also called shadowing, is a powerful concept that allows feature teams to bring changes to production with as little risk as possible.
