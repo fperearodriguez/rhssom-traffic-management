@@ -1,9 +1,9 @@
 # rhossm-traffic-management
-Examples of traffic management using bookinfo application.
+Examples of traffic management using the bookinfo sample application.
 
 ## Prerequisites
  - OCP up and running.
- - Openshift Service Mesh installed [Openshift Service Mesh](https://docs.openshift.com/container-platform/4.8/service_mesh/v2x/ossm-about.html).
+ - Openshift Service Mesh installed [Openshift Service Mesh](https://docs.openshift.com/container-platform/4.9/service_mesh/v2x/ossm-about.html).
  <!-- - Egress configured in SMCP [Egress config](ossm-config/basic.yaml). -->
 
 ### Deploy Bookinfo application
@@ -56,32 +56,6 @@ watch -n 1 curl -vI $GATEWAY_URL/productpage
 export MTLS_GATEWAY_URL=$(oc get route bookinfo-secure -n istio-system -o jsonpath='{.spec.host}')
 watch -n 1 curl -vI https://$MTLS_GATEWAY_URL/productpage  --cacert ossm/certs/ca.pem --cert ossm/certs/client.pem --key ossm/certs/client.key
 ```
-
-### Deploy and expose the httpbin application
-Deploy httpbin application in _bookinfo_ namespace
-```
-oc process -f httpbin/httpbin.yaml \
-    -p HTTPBIN_ROUTE="httpbin.$EXTERNAL_DOMAIN" -p HTTPBIN_ROUTE_SECURE="httpbin.secure.$EXTERNAL_DOMAIN" -n bookinfo \
-    | oc apply -n bookinfo -f -
-```
-
-Replace the $EXTERNAL_DOMAIN variable in the [OpenShift route object](./httpbin/httpbin-route.yaml) object and in the following command. Create the OCP route.
-```
-oc process -f httpbin/httpbin-route.yaml \
-    -p HTTPBIN_ROUTE_NAME="httpbin" -p HTTPBIN_ROUTE="httpbin.$EXTERNAL_DOMAIN" -p HTTPBIN_ROUTE_SECURE="httpbin.secure.$EXTERNAL_DOMAIN" -p HTTPBIN_REPLICAS=3\
-    -n istio-system \
-    | oc apply -n istio-system -f -
-```
-
-Access the httpbin application
-```
-export HTTPBIN_GATEWAY_URL=$(oc get route httpbin -n istio-system -o jsonpath='{.spec.host}')
-watch -n 1 curl -vI http://$HTTPBIN_GATEWAY_URL/
-
-export SECURE_HTTPBIN_GATEWAY_URL=$(oc get route httpbin-secure -n istio-system -o jsonpath='{.spec.host}')
-watch -n 1 curl -vI https://$SECURE_HTTPBIN_GATEWAY_URL/ --cacert ossm/certs/ca.pem --cert ossm/certs/client.pem --key ossm/certs/client.key
-```
-
 ## Lab 1: Request routing
 OpenShift Service Mesh by default routes requests in a round robin manner.
 
